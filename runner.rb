@@ -6,6 +6,15 @@ require 'digest'
 # # 8667cf2942a759f257177010b094539dd6084a8f0147f01fa3284cc3310721c8
 # cipher_text = Digest::SHA256.hexdigest(plain_text)
 
+class Array
+  def sum
+    self.inject(0.0) { |sum, x| sum += x }
+  end
+
+  def mean
+    sum / self.size
+  end
+end
 
 module Util
   def self.hash_it(plain_text)
@@ -26,7 +35,11 @@ module Util
   end
 
   def self.generate_random_solution(original_hash)
-    Solution.new(rand.to_s, original_hash)
+    Solution.new(generate_plain_text, original_hash)
+  end
+
+  def self.generate_plain_text
+    rand(10**100).to_s(2)
   end
 end
 
@@ -53,8 +66,9 @@ class Solution
   def to_s
     [
       "Score: #{@score}",
-      "Age: #{@age}",
-      @hash
+      "Age: #{@age}  ",
+      "Plain: #{@plain_text[0..9]}",
+      "Hash: #{@hash[0..9]}"
     ].join("\t")
   end
 end
@@ -64,11 +78,15 @@ module Raffle
     max_score = 256
     hat = []
     solutions.each do |s|
-      entries_into_the_hat = 256 - s.score
+      entries_into_the_hat = max_score - s.score
       entries_into_the_hat.times { hat << s.hash }
     end
 
     hat.shuffle.sort[0]
+  end
+
+  def self.pick_solution_hash_to_mutate(solutions)
+    solutions.shuffle[0]
   end
 end
 
@@ -94,10 +112,14 @@ class SolutionGroup
     end
   end
 
+  def mean_score
+    @solutions.values.map {|s| s.score }.mean
+  end
+
   def to_s
     @solutions.values.sort.reverse.map {|s| s.to_s }.join("\n")
   end
-end 
+end
 
 original_hash = ARGV[0]
 
@@ -107,8 +129,13 @@ sg = SolutionGroup.new(population_size, original_hash)
 
 puts sg
 
-10.times do
+times_to_run = 10_0
+(1..times_to_run).each do |iteration|
   sg.cycle
-  puts sg
-  puts ''
+  if iteration % (times_to_run / 100) == 0
+    puts "*** Iteration #{iteration}"
+    puts sg
+    puts "Mean Score: #{sg.mean_score}"
+    puts ''
+  end
 end

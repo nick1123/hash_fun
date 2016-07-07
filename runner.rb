@@ -12,7 +12,15 @@ class Array
   end
 
   def mean
+    return nil if self.empty?
     sum / self.size
+  end
+
+  def median
+    return nil if self.empty?
+    array = self.sort
+    m_pos = array.size / 2
+    return array.size % 2 == 1 ? array[m_pos] : array[m_pos-1..m_pos].mean
   end
 end
 
@@ -35,11 +43,18 @@ module Util
   end
 
   def self.generate_random_solution(original_hash)
-    Solution.new(generate_plain_text, original_hash)
+    Solution.new(generate_plain_text, original_hash, 1, 'Random')
   end
 
   def self.generate_plain_text
     rand(10**100).to_s(2)
+  end
+
+  def self.mutate(plain_text)
+    position = rand(plain_text.size)
+    char = plain_text[position]
+    plain_text[position] = (char == '1' ? '0' : '1')
+    plain_text
   end
 end
 
@@ -48,34 +63,52 @@ class Solution
 
   attr_reader :hash, :score, :age
 
-  def initialize(plain_text, original_hash)
-    @plain_text = plain_text
-    @hash = Util.hash_it(plain_text.to_s)
-    @score = Util.hash_similarity_score(@hash, original_hash)
-    @age = 1
+  def initialize(plain_text, original_hash, generation, classification)
+    @plain_text     = plain_text
+    @original_hash  = original_hash
+    @hash           = Util.hash_it(plain_text.to_s)
+    @generation     = generation
+    @classification = classification
+    @age            = 0
+    compute_score
   end
 
   def <=>(anOther)
     @score <=> anOther.score
   end
 
-  def increment_age
+  def increment_age!
     @age += 1
+  end
+
+  def mutate!
+    @plain_text = Util.mutate(@plain_text.clone)
+    @generation += 1
+    @classification = 'Mutant'
   end
 
   def to_s
     [
       "Score: #{@score}",
+      "Match %: #{100 * @score / 256}",
+      "Gen: #{@generation}  ",
       "Age: #{@age}  ",
-      "Plain: #{@plain_text[0..9]}",
-      "Hash: #{@hash[0..9]}"
+      "Class: #{@classification}",
+      "Plain: #{@plain_text[0..12]}",
+      "Hash: #{@hash[0..12]}"
     ].join("\t")
+  end
+
+  private
+
+  def compute_score
+    @score = Util.hash_similarity_score(@hash, @original_hash)
   end
 end
 
 module Raffle
   def self.pick_solution_hash_to_kill_off(solutions)
-    max_score = 256
+    max_score = solutions.map {|s| s.score}.max
     hat = []
     solutions.each do |s|
       entries_into_the_hat = max_score - s.score
@@ -85,7 +118,7 @@ module Raffle
     hat.shuffle.sort[0]
   end
 
-  def self.pick_solution_hash_to_mutate(solutions)
+  def self.pick_solution_to_mutate(solutions)
     solutions.shuffle[0]
   end
 end
@@ -99,10 +132,23 @@ class SolutionGroup
   end
 
   def cycle
+    mutate_someone!
+    kill_off_the_weak!
+    increment_everyones_age!
+    populate!
+  end
+
+  def mutate_someone!
+    Raffle.pick_solution_to_mutate(@solutions.values).mutate!
+  end
+
+  def increment_everyones_age!
+    @solutions.values.each {|s| s.increment_age! }
+  end
+
+  def kill_off_the_weak!
     hash = Raffle.pick_solution_hash_to_kill_off(@solutions.values)
     @solutions.delete(hash)
-    @solutions.values.each {|s| s.increment_age }
-    populate!
   end
 
   def populate!
@@ -116,26 +162,40 @@ class SolutionGroup
     @solutions.values.map {|s| s.score }.mean
   end
 
+  def median_score
+    @solutions.values.map {|s| s.score }.median
+  end
+
+  def highest_score
+    @solutions.values.map {|s| s.score }.max
+  end
+
   def to_s
-    @solutions.values.sort.reverse.map {|s| s.to_s }.join("\n")
+    @solutions.values.sort.reverse[0..9].map {|s| s.to_s }.join("\n")
   end
 end
 
 original_hash = ARGV[0]
 
-population_size = 40
+population_size = 100
 
 sg = SolutionGroup.new(population_size, original_hash)
 
-puts sg
+def print(sg, iteration)
+  puts "*** Iteration #{iteration}"
+  puts sg
+  puts "Highest Score: #{sg.highest_score}"
+  puts "  Mean Score:  #{sg.mean_score}"
+  puts "Median Score:  #{sg.median_score}"
+  puts ''
+end
 
-times_to_run = 10_0
+print(sg, 0)
+
+times_to_run = 1_00_000
 (1..times_to_run).each do |iteration|
   sg.cycle
   if iteration % (times_to_run / 100) == 0
-    puts "*** Iteration #{iteration}"
-    puts sg
-    puts "Mean Score: #{sg.mean_score}"
-    puts ''
+    print(sg, iteration)
   end
 end

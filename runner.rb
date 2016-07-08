@@ -42,12 +42,24 @@ module Util
     num.hex.to_s(2).rjust(num.size*4, '0')
   end
 
-  def self.generate_random_solution(original_cipher_text)
-    Solution.new(generate_plain_text, original_cipher_text, 1, 'Random')
+  def self.plain_text_power
+#    rand(500) + 100
+    500
   end
 
-  def self.generate_plain_text
-    rand(10**100).to_s(2)
+  def self.generate_random_solution(original_cipher_text)
+    power = plain_text_power
+    Solution.new(
+      generate_plain_text(power),
+      power,
+      original_cipher_text,
+      1,
+      'Random'
+    )
+  end
+
+  def self.generate_plain_text(power)
+    rand( 10 ** power ).to_s(2)
   end
 
   def self.mutate(plain_text, mutation_strategy)
@@ -70,12 +82,11 @@ class MutationStrategy
     @plain_text_length          = plain_text_length
     @start_position             = rand(@plain_text_length - 1) + 1
     @distance_between_positions = rand(@plain_text_length - 1) + 1
-    @mutation_count             = rand(20) + 1
+    @mutation_count             = rand(100) + 1
   end
 
   def to_s
     [
-      "Mut Strategy:",
       "Count: #{mutation_count}",
       "Start: #{start_position}",
       "Dist: #{distance_between_positions}"
@@ -86,12 +97,13 @@ end
 class Solution
   include Comparable
 
-  attr_reader :cipher_text, :score, :age, :plain_text, :generation
+  attr_reader :cipher_text, :score, :age, :plain_text, :generation, :plain_text_power
 
   MUTANT = 'Mutant'
 
-  def initialize(plain_text, original_cipher_text, generation, classification, mutation_strategy=nil)
+  def initialize(plain_text, plain_text_power, original_cipher_text, generation, classification, mutation_strategy=nil)
     @plain_text     = plain_text
+    @plain_text_power = plain_text_power
     @original_cipher_text  = original_cipher_text
     @cipher_text           = Util.cipher_text_it(plain_text.to_s)
     @generation     = generation
@@ -114,6 +126,7 @@ class Solution
 
     Solution.new(
       Util.mutate(@plain_text.clone, new_mutation_strategy),
+      plain_text_power,
       @original_cipher_text,
       @generation + 1,
       MUTANT,
@@ -123,13 +136,14 @@ class Solution
 
   def to_s
     [
-      "Score: #{@score}",
-      "Match %: #{(100.0 * @score / 256).round(1)}",
-      "Gen: #{@generation}  ",
-      "Age: #{@age}  ",
-      "Class: #{@classification}",
-      "Plain: #{@plain_text[0..12]}",
-      "cipher_text: #{@cipher_text[0..12]}",
+      "Score #{@score}",
+      "Match % #{(100.0 * @score / 256).round(1)}",
+      "Gen #{@generation}",
+      "Age #{@age}  ",
+      "#{@classification}",
+      "#{@plain_text[0..12]} => #{@cipher_text[0..12]}",
+      "Size #{@plain_text.size}",
+      "Power #{@plain_text_power}",
       @mutation_strategy
     ].join("\t")
   end
@@ -155,8 +169,8 @@ module Raffle
   end
 
   def self.pick_solution_to_mutate(solutions)
-#    solutions.shuffle[0]
-        solutions.sort[-1]
+    solutions.shuffle[0]
+#    solutions.sort[-1]
   end
 
   def self.pick_2_solution_cipher_texts_to_mate(solutions)
@@ -186,22 +200,22 @@ class SolutionGroup
     increment_everyones_age!
   end
 
-  def create_offspring
-    parent_cipher_textes = Raffle.pick_2_solution_cipher_texts_to_mate(@solutions.values)
-    parent_1 = @solutions[parent_cipher_textes[0]]
-    parent_2 = @solutions[parent_cipher_textes[1]]
-
-    size = [parent_1.plain_text.size, parent_2.plain_text.size].min
-    plain_text = (0..(size - 1)).map do |index|
-      rand > 0.5 ? parent_1.plain_text[index] : parent_2.plain_text[index]
-    end.join('')
-
-#    plain_text = Util.mutate(plain_text)
-
-    generation = [parent_1.generation, parent_2.generation].max + 1
-
-    Solution.new(plain_text, @original_cipher_text, generation, 'Child')
-  end
+#  def create_offspring
+#    parent_cipher_textes = Raffle.pick_2_solution_cipher_texts_to_mate(@solutions.values)
+#    parent_1 = @solutions[parent_cipher_textes[0]]
+#    parent_2 = @solutions[parent_cipher_textes[1]]
+#
+#    size = [parent_1.plain_text.size, parent_2.plain_text.size].min
+#    plain_text = (0..(size - 1)).map do |index|
+#      rand > 0.5 ? parent_1.plain_text[index] : parent_2.plain_text[index]
+#    end.join('')
+#
+##    plain_text = Util.mutate(plain_text)
+#
+#    generation = [parent_1.generation, parent_2.generation].max + 1
+#
+#    Solution.new(plain_text, @original_cipher_text, generation, 'Child')
+#  end
 
   def create_mutant_clone
     solution = Raffle.pick_solution_to_mutate(@solutions.values)
@@ -239,7 +253,9 @@ class SolutionGroup
         raise "Unknown strategy!"
       end
 
-      @solutions[new_solution.cipher_text] = new_solution
+      if @solutions[new_solution.cipher_text].nil?
+        @solutions[new_solution.cipher_text] = new_solution
+      end
     end
   end
 

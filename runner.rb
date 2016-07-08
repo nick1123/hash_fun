@@ -204,6 +204,9 @@ class SolutionGroup
 
   def kill_off_the_weak!
     cipher_text = Raffle.pick_solution_cipher_text_to_kill_off(@solutions.values)
+    puts "kill"
+    puts @solutions[cipher_text]
+    puts ''
     @solutions.delete(cipher_text)
   end
 
@@ -270,7 +273,7 @@ end
 
 print(sg, 0)
 
-times_to_run = 100_000
+times_to_run = 1_000
 (1..times_to_run).each do |iteration|
   sg.cycle
   if iteration % (times_to_run / 100) == 0

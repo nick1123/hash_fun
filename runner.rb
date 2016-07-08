@@ -50,19 +50,36 @@ module Util
     rand(10**100).to_s(2)
   end
 
-  def self.mutation_rate
-#    (rand(4999) + 1) * 2 # evens upto 9998
-#    2 * (rand(5) + 1)
-    2
+  def self.mutate(plain_text, mutation_strategy)
+    current_position = mutation_strategy.start_position
+
+    mutation_strategy.mutation_count.times do
+      char = plain_text[current_position]
+      plain_text[current_position] = (char == '1' ? '0' : '1')
+      current_position = (current_position + mutation_strategy.distance_between_positions) % plain_text.size
+    end
+
+    plain_text
+  end
+end
+
+class MutationStrategy
+  attr_reader :start_position, :distance_between_positions, :mutation_count
+
+  def initialize(plain_text_length)
+    @plain_text_length          = plain_text_length
+    @start_position             = rand(@plain_text_length - 1) + 1
+    @distance_between_positions = rand(@plain_text_length - 1) + 1
+    @mutation_count             = rand(20) + 1
   end
 
-  def self.mutate(plain_text, mutation_rate)
-    mutation_rate.times do
-      position = rand(plain_text.size)
-      char = plain_text[position]
-      plain_text[position] = (char == '1' ? '0' : '1')
-    end
-    plain_text
+  def to_s
+    [
+      "Mut Strategy:",
+      "Count: #{mutation_count}",
+      "Start: #{start_position}",
+      "Dist: #{distance_between_positions}"
+    ].join("\t")
   end
 end
 
@@ -73,13 +90,13 @@ class Solution
 
   MUTANT = 'Mutant'
 
-  def initialize(plain_text, original_cipher_text, generation, classification, mutation_rate=nil)
+  def initialize(plain_text, original_cipher_text, generation, classification, mutation_strategy=nil)
     @plain_text     = plain_text
     @original_cipher_text  = original_cipher_text
     @cipher_text           = Util.cipher_text_it(plain_text.to_s)
     @generation     = generation
     @classification = classification
-    @mutation_rate = mutation_rate
+    @mutation_strategy = mutation_strategy
     @age            = 0
     compute_score
   end
@@ -93,14 +110,14 @@ class Solution
   end
 
   def mutant_clone
-    mutation_rate = Util.mutation_rate
+    new_mutation_strategy = MutationStrategy.new(plain_text.size)
 
     Solution.new(
-      Util.mutate(@plain_text.clone, mutation_rate),
+      Util.mutate(@plain_text.clone, new_mutation_strategy),
       @original_cipher_text,
       @generation + 1,
       MUTANT,
-      mutation_rate,
+      new_mutation_strategy,
     )
   end
 
@@ -108,24 +125,16 @@ class Solution
     [
       "Score: #{@score}",
       "Match %: #{(100.0 * @score / 256).round(1)}",
-      "Gen: #{@generation}",
+      "Gen: #{@generation}  ",
       "Age: #{@age}  ",
       "Class: #{@classification}",
-      mutation_rate_to_s,
       "Plain: #{@plain_text[0..12]}",
-      "cipher_text: #{@cipher_text[0..12]}"
+      "cipher_text: #{@cipher_text[0..12]}",
+      @mutation_strategy
     ].join("\t")
   end
 
   private
-
-  def mutation_rate_to_s
-    if @classification == MUTANT
-      "Mut Rate: #{@mutation_rate}"
-    else
-      "\t"
-    end
-  end
 
   def compute_score
     @score = Util.cipher_text_similarity_score(@cipher_text, @original_cipher_text)
@@ -147,7 +156,7 @@ module Raffle
 
   def self.pick_solution_to_mutate(solutions)
 #    solutions.shuffle[0]
-    solutions.sort[-1]
+        solutions.sort[-1]
   end
 
   def self.pick_2_solution_cipher_texts_to_mate(solutions)
@@ -163,16 +172,17 @@ module Raffle
 end
 
 class SolutionGroup
-  def initialize(population_size, original_cipher_text)
+  def initialize(population_size, original_cipher_text, initial_population_size)
     @population_size = population_size
     @original_cipher_text = original_cipher_text
     @solutions = {}
-    populate!(true)
+    populate!(initial_population_size, true)
+    kill_off_the_weak!
   end
 
   def cycle
     kill_off_the_weak!
-    populate!
+    populate!(@population_size)
     increment_everyones_age!
   end
 
@@ -203,15 +213,14 @@ class SolutionGroup
   end
 
   def kill_off_the_weak!
-    cipher_text = Raffle.pick_solution_cipher_text_to_kill_off(@solutions.values)
-    puts "kill"
-    puts @solutions[cipher_text]
-    puts ''
-    @solutions.delete(cipher_text)
+    while @solutions.keys.size > (@population_size - 1)
+      cipher_text = Raffle.pick_solution_cipher_text_to_kill_off(@solutions.values)
+      @solutions.delete(cipher_text)
+    end
   end
 
-  def populate!(only_random=false)
-    while @solutions.keys.size < @population_size
+  def populate!(population_size, only_random=false)
+    while @solutions.keys.size < population_size
       strategy = [
         :add_mutant,
      #   :add_offspring,
@@ -259,7 +268,8 @@ original_cipher_text = ARGV[0]
 
 population_size = 10
 
-sg = SolutionGroup.new(population_size, original_cipher_text)
+initial_population_size = 100
+sg = SolutionGroup.new(population_size, original_cipher_text, initial_population_size)
 
 def print(sg, iteration)
   puts "*** Iteration #{iteration}"
@@ -273,7 +283,7 @@ end
 
 print(sg, 0)
 
-times_to_run = 1_000
+times_to_run = 10_00_000
 (1..times_to_run).each do |iteration|
   sg.cycle
   if iteration % (times_to_run / 100) == 0

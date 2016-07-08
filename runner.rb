@@ -25,13 +25,13 @@ class Array
 end
 
 module Util
-  def self.hash_it(plain_text)
+  def self.cipher_text_it(plain_text)
   	Digest::SHA256.hexdigest(plain_text)
   end
 
-  def self.hash_similarity_score(hash1, hash2)
-    binary1 = hex_to_binary(hash1)
-    binary2 = hex_to_binary(hash2)
+  def self.cipher_text_similarity_score(cipher_text1, cipher_text2)
+    binary1 = hex_to_binary(cipher_text1)
+    binary2 = hex_to_binary(cipher_text2)
 
     (0..255).to_a.inject(0) do |sum, index|
       binary1[index] == binary2[index] ? sum + 1 : sum
@@ -42,8 +42,8 @@ module Util
     num.hex.to_s(2).rjust(num.size*4, '0')
   end
 
-  def self.generate_random_solution(original_hash)
-    Solution.new(generate_plain_text, original_hash, 1, 'Random')
+  def self.generate_random_solution(original_cipher_text)
+    Solution.new(generate_plain_text, original_cipher_text, 1, 'Random')
   end
 
   def self.generate_plain_text
@@ -61,12 +61,12 @@ end
 class Solution
   include Comparable
 
-  attr_reader :hash, :score, :age
+  attr_reader :cipher_text, :score, :age, :plain_text, :generation
 
-  def initialize(plain_text, original_hash, generation, classification)
+  def initialize(plain_text, original_cipher_text, generation, classification)
     @plain_text     = plain_text
-    @original_hash  = original_hash
-    @hash           = Util.hash_it(plain_text.to_s)
+    @original_cipher_text  = original_cipher_text
+    @cipher_text           = Util.cipher_text_it(plain_text.to_s)
     @generation     = generation
     @classification = classification
     @age            = 0
@@ -81,11 +81,12 @@ class Solution
     @age += 1
   end
 
-  def mutate!
-    @plain_text = Util.mutate(@plain_text.clone)
-    @generation += 1
-    @classification = 'Mutant'
-  end
+#  def mutate!
+#    @plain_text = Util.mutate(@plain_text.clone)
+#    @generation += 1
+#    @classification = 'Mutant'
+#    compute_score
+#  end
 
   def to_s
     [
@@ -95,66 +96,101 @@ class Solution
       "Age: #{@age}  ",
       "Class: #{@classification}",
       "Plain: #{@plain_text[0..12]}",
-      "Hash: #{@hash[0..12]}"
+      "cipher_text: #{@cipher_text[0..12]}"
     ].join("\t")
   end
 
   private
 
   def compute_score
-    @score = Util.hash_similarity_score(@hash, @original_hash)
+    @score = Util.cipher_text_similarity_score(@cipher_text, @original_cipher_text)
   end
 end
 
 module Raffle
-  def self.pick_solution_hash_to_kill_off(solutions)
-    max_score = solutions.map {|s| s.score}.max
-    hat = []
-    solutions.each do |s|
-      entries_into_the_hat = max_score - s.score
-      entries_into_the_hat.times { hat << s.hash }
-    end
-
-    hat.shuffle.sort[0]
+  def self.pick_solution_cipher_text_to_kill_off(solutions)
+#    max_score = solutions.map {|s| s.score}.max
+#    hat = []
+#    solutions.each do |s|
+#      entries_into_the_hat = max_score - s.score
+#      entries_into_the_hat.times { hat << s.cipher_text }
+#    end
+#
+#    hat.shuffle.sort[0]
+    solutions.sort[0].cipher_text
   end
 
   def self.pick_solution_to_mutate(solutions)
     solutions.shuffle[0]
   end
+
+  def self.pick_2_solution_cipher_texts_to_mate(solutions)
+    min_score = solutions.map {|s| s.score}.min
+    hat = []
+    solutions.each do |s|
+      entries_into_the_hat = s.score - min_score
+      entries_into_the_hat.times { hat << s.cipher_text }
+    end
+
+    hat.shuffle.uniq[0..1]
+  end
 end
 
 class SolutionGroup
-  def initialize(population_size, original_hash)
+  def initialize(population_size, original_cipher_text)
     @population_size = population_size
-    @original_hash = original_hash
+    @original_cipher_text = original_cipher_text
     @solutions = {}
     populate!
   end
 
   def cycle
-    mutate_someone!
     kill_off_the_weak!
+    kill_off_the_weak!
+    make_off_spring!
     increment_everyones_age!
     populate!
   end
 
-  def mutate_someone!
-    Raffle.pick_solution_to_mutate(@solutions.values).mutate!
+  def make_off_spring!
+    parent_cipher_textes = Raffle.pick_2_solution_cipher_texts_to_mate(@solutions.values)
+    parent_1 = @solutions[parent_cipher_textes[0]]
+    parent_2 = @solutions[parent_cipher_textes[1]]
+
+    size = [parent_1.plain_text.size, parent_2.plain_text.size].min
+    plain_text = (0..(size - 1)).map do |index|
+      rand > 0.5 ? parent_1.plain_text[index] : parent_2.plain_text[index]
+    end.join('')
+
+    plain_text = Util.mutate(plain_text)
+
+    generation = [parent_1.generation, parent_2.generation].max + 1
+
+    solution = Solution.new(plain_text, @original_cipher_text, generation, 'Child')
+    @solutions[solution.cipher_text] = solution
   end
+
+#  def mutate_someone!
+#    solution = Raffle.pick_solution_to_mutate(@solutions.values)
+#    old_cipher_text = solution.cipher_text
+#    @solutions.delete(old_cipher_text)
+#    solution.mutate!
+#    @solutions[solution.cipher_text] = solution
+#  end
 
   def increment_everyones_age!
     @solutions.values.each {|s| s.increment_age! }
   end
 
   def kill_off_the_weak!
-    hash = Raffle.pick_solution_hash_to_kill_off(@solutions.values)
-    @solutions.delete(hash)
+    cipher_text = Raffle.pick_solution_cipher_text_to_kill_off(@solutions.values)
+    @solutions.delete(cipher_text)
   end
 
   def populate!
     while @solutions.keys.size < @population_size
-      solution = Util.generate_random_solution(@original_hash)
-      @solutions[solution.hash] = solution
+      solution = Util.generate_random_solution(@original_cipher_text)
+      @solutions[solution.cipher_text] = solution
     end
   end
 
@@ -170,29 +206,34 @@ class SolutionGroup
     @solutions.values.map {|s| s.score }.max
   end
 
+  def population_size
+    @solutions.keys.size
+  end
+
   def to_s
-    @solutions.values.sort.reverse[0..9].map {|s| s.to_s }.join("\n")
+    @solutions.values.sort.reverse[0..29].map {|s| s.to_s }.join("\n")
   end
 end
 
-original_hash = ARGV[0]
+original_cipher_text = ARGV[0]
 
-population_size = 100
+population_size = 10
 
-sg = SolutionGroup.new(population_size, original_hash)
+sg = SolutionGroup.new(population_size, original_cipher_text)
 
 def print(sg, iteration)
   puts "*** Iteration #{iteration}"
   puts sg
   puts "Highest Score: #{sg.highest_score}"
-  puts "  Mean Score:  #{sg.mean_score}"
-  puts "Median Score:  #{sg.median_score}"
+  puts "   Mean Score: #{sg.mean_score}"
+  puts " Median Score: #{sg.median_score}"
+  puts "    Pop. Size: #{sg.population_size}"
   puts ''
 end
 
 print(sg, 0)
 
-times_to_run = 1_00_000
+times_to_run = 10_000_000
 (1..times_to_run).each do |iteration|
   sg.cycle
   if iteration % (times_to_run / 100) == 0

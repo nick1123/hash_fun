@@ -24,6 +24,8 @@ class Array
   end
 end
 
+
+
 module Util
   def self.cipher_text_it(plain_text)
   	Digest::SHA256.hexdigest(plain_text)
@@ -42,73 +44,44 @@ module Util
     num.hex.to_s(2).rjust(num.size*4, '0')
   end
 
-  def self.plain_text_power
-#    rand(500) + 100
-    500
-  end
-
-  def self.generate_random_solution(original_cipher_text)
-    power = plain_text_power
+  def self.generate_origin_solution(original_cipher_text)
     Solution.new(
-      generate_plain_text(power),
-      power,
+      generate_plain_text,
       original_cipher_text,
       1,
-      'Random'
+      'Origin'
     )
   end
 
-  def self.generate_plain_text(power)
-    rand( 10 ** power ).to_s(2)
+  def self.generate_plain_text
+    "0" * 1000
   end
 
-  def self.mutate(plain_text, mutation_strategy)
-    current_position = mutation_strategy.start_position
-
-    mutation_strategy.mutation_count.times do
-      char = plain_text[current_position]
-      plain_text[current_position] = (char == '1' ? '0' : '1')
-      current_position = (current_position + mutation_strategy.distance_between_positions) % plain_text.size
+  def self.mutate(plain_text, mutation_count)
+    mutation_count.times do
+      position = rand(plain_text.size)
+      char = plain_text[position]
+      plain_text[position] = (char == '1' ? '0' : '1')
     end
 
     plain_text
   end
 end
 
-class MutationStrategy
-  attr_reader :start_position, :distance_between_positions, :mutation_count
-
-  def initialize(plain_text_length)
-    @plain_text_length          = plain_text_length
-    @start_position             = rand(@plain_text_length - 1) + 1
-    @distance_between_positions = rand(@plain_text_length - 1) + 1
-    @mutation_count             = rand(100) + 1
-  end
-
-  def to_s
-    [
-      "Count: #{mutation_count}",
-      "Start: #{start_position}",
-      "Dist: #{distance_between_positions}"
-    ].join("\t")
-  end
-end
-
 class Solution
   include Comparable
 
-  attr_reader :cipher_text, :score, :age, :plain_text, :generation, :plain_text_power
+  attr_reader :cipher_text, :score, :age, :plain_text, :generation
 
   MUTANT = 'Mutant'
 
-  def initialize(plain_text, plain_text_power, original_cipher_text, generation, classification, mutation_strategy=nil)
+  def initialize(plain_text, original_cipher_text, generation, classification, mutation_count=nil)
     @plain_text     = plain_text
-    @plain_text_power = plain_text_power
     @original_cipher_text  = original_cipher_text
     @cipher_text           = Util.cipher_text_it(plain_text.to_s)
     @generation     = generation
     @classification = classification
-    @mutation_strategy = mutation_strategy
+    @mutation_count = mutation_count
     @age            = 0
     compute_score
   end
@@ -122,15 +95,13 @@ class Solution
   end
 
   def mutant_clone
-    new_mutation_strategy = MutationStrategy.new(plain_text.size)
-
+    new_mutation_count = 2#rand(200) + 1
     Solution.new(
-      Util.mutate(@plain_text.clone, new_mutation_strategy),
-      plain_text_power,
+      Util.mutate(@plain_text.clone, new_mutation_count),
       @original_cipher_text,
       @generation + 1,
       MUTANT,
-      new_mutation_strategy,
+      new_mutation_count,
     )
   end
 
@@ -143,12 +114,17 @@ class Solution
       "#{@classification}",
       "#{@plain_text[0..12]} => #{@cipher_text[0..12]}",
       "Size #{@plain_text.size}",
-      "Power #{@plain_text_power}",
-      @mutation_strategy
+      mutation_count_to_s
     ].join("\t")
   end
 
   private
+
+  def mutation_count_to_s
+    if @classification == MUTANT
+      "Mutation Count: #{@mutation_count}"
+    end
+  end
 
   def compute_score
     @score = Util.cipher_text_similarity_score(@cipher_text, @original_cipher_text)
@@ -156,21 +132,13 @@ class Solution
 end
 
 module Raffle
-  def self.pick_solution_cipher_text_to_kill_off(solutions)
-#    max_score = solutions.map {|s| s.score}.max
-#    hat = []
-#    solutions.each do |s|
-#      entries_into_the_hat = max_score - s.score
-#      entries_into_the_hat.times { hat << s.cipher_text }
-#    end
-#
-#    hat.shuffle.sort[0]
-    solutions.sort[0].cipher_text
+  def self.pick_solution_to_kill_off(solutions)
+    solutions.sort[0]
   end
 
   def self.pick_solution_to_mutate(solutions)
-    solutions.shuffle[0]
-#    solutions.sort[-1]
+    solutions.sort[-1]
+#    solutions.shuffle[0]
   end
 
   def self.pick_2_solution_cipher_texts_to_mate(solutions)
@@ -186,17 +154,17 @@ module Raffle
 end
 
 class SolutionGroup
-  def initialize(population_size, original_cipher_text, initial_population_size)
+  def initialize(population_size, original_cipher_text)
     @population_size = population_size
     @original_cipher_text = original_cipher_text
     @solutions = {}
-    populate!(initial_population_size, true)
-    kill_off_the_weak!
+    add_new_solution(Util.generate_origin_solution(@original_cipher_text))
+    populate!
   end
 
   def cycle
     kill_off_the_weak!
-    populate!(@population_size)
+    populate!
     increment_everyones_age!
   end
 
@@ -227,25 +195,19 @@ class SolutionGroup
   end
 
   def kill_off_the_weak!
-    while @solutions.keys.size > (@population_size - 1)
-      cipher_text = Raffle.pick_solution_cipher_text_to_kill_off(@solutions.values)
-      @solutions.delete(cipher_text)
-    end
+    solution = Raffle.pick_solution_to_kill_off(@solutions.values)
+    @solutions.delete(solution.plain_text)
   end
 
-  def populate!(population_size, only_random=false)
-    while @solutions.keys.size < population_size
+  def populate!
+    while @solutions.keys.size < @population_size
       strategy = [
         :add_mutant,
      #   :add_offspring,
-     #   :add_random
       ].shuffle[0]
 
-      strategy = :add_random if only_random
       new_solution = nil
-      if strategy == :add_random
-        new_solution = Util.generate_random_solution(@original_cipher_text)
-      elsif strategy == :add_mutant
+      if strategy == :add_mutant
         new_solution = create_mutant_clone
       elsif strategy == :add_offspring
         new_solution = create_offspring
@@ -253,9 +215,13 @@ class SolutionGroup
         raise "Unknown strategy!"
       end
 
-      if @solutions[new_solution.cipher_text].nil?
-        @solutions[new_solution.cipher_text] = new_solution
-      end
+      add_new_solution(new_solution)
+    end
+  end
+
+  def add_new_solution(solution)
+    if @solutions[solution.plain_text].nil?
+      @solutions[solution.plain_text] = solution
     end
   end
 
@@ -284,8 +250,7 @@ original_cipher_text = ARGV[0]
 
 population_size = 10
 
-initial_population_size = 100
-sg = SolutionGroup.new(population_size, original_cipher_text, initial_population_size)
+sg = SolutionGroup.new(population_size, original_cipher_text)
 
 def print(sg, iteration)
   puts "*** Iteration #{iteration}"
@@ -299,7 +264,7 @@ end
 
 print(sg, 0)
 
-times_to_run = 10_00_000
+times_to_run = 1_000_000
 (1..times_to_run).each do |iteration|
   sg.cycle
   if iteration % (times_to_run / 100) == 0
